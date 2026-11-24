@@ -183,22 +183,49 @@ header{background:#fff;position:sticky;top:0;z-index:5;border-bottom:1px solid v
     status.textContent='Préparation de votre commande…';
     const button=form.querySelector('button[type="submit"]');
     button.disabled=true;
-    const data=new FormData(form);
-    data.append('product','Mug personnalisé');
-    try{
-      const response=await fetch('/.netlify/functions/create-checkout',{method:'POST',body:data});
-      const responseText = await response.text();
-const result = responseText ? JSON.parse(responseText) : {};
-      if(!response.ok||!result.url) throw new Error(result.error||'Le paiement n’est pas encore configuré.');
-      window.location.href=result.url;
-    }catch(error){
-      status.textContent = error.message || 'Une erreur est survenue lors de la commande.';
-      button.disabled=false;
+    const data = new FormData(form);
+data.append('product', 'Mug personnalisé');
+
+try {
+  const photoFile = photo.files[0];
+
+  if (photoFile) {
+    const uploadData = new FormData();
+    uploadData.append('file', photoFile);
+    uploadData.append('upload_preset', 'boutique-katia');
+
+    const uploadResponse = await fetch(
+      'https://api.cloudinary.com/v1_1/rivarxb1/image/upload',
+      {
+        method: 'POST',
+        body: uploadData
+      }
+    );
+
+    const uploadResult = await uploadResponse.json();
+
+    if (!uploadResponse.ok || !uploadResult.secure_url) {
+      throw new Error("Impossible d'envoyer la photo.");
     }
-  });
-})();
-</script>
-\n</body></html>
-<script>
-console.log("Boutique prête pour Stripe");
-</script>
+
+    data.append('photo_url', uploadResult.secure_url);
+  }
+
+  const response = await fetch(
+    '/.netlify/functions/create-checkout',
+    { method: 'POST', body: data }
+  );
+
+  const responseText = await response.text();
+  const result = responseText ? JSON.parse(responseText) : {};
+
+  if (!response.ok || !result.url) {
+    throw new Error(result.error || 'Le paiement n’est pas encore configuré.');
+  }
+
+  window.location.href = result.url;
+
+} catch (error) {
+  status.textContent = error.message || 'Une erreur est survenue lors de la commande.';
+  button.disabled = false;
+}
