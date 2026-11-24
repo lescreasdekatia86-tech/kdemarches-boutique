@@ -1,41 +1,154 @@
 
 exports.handler = async (event) => {
+  const headers = {
+    "Content-Type": "application/json"
+  };
+
+  const reply = (statusCode, data) => ({
+    statusCode,
+    headers,
+    body: JSON.stringify(data)
+  });
+
   if (event.httpMethod !== "POST") {
-    return {
-      statusCode: 405,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        error: "Méthode non autorisée"
-      })
-    };
+    return reply(405, { error: "Méthode non autorisée." });
   }
 
   try {
+    const secretKey = process.env.STRIPE_SECRET_KEY;
+    const siteUrl = process.env.URL || process.env.DEPLOY_PRIME_URL;
+
+    if (!secretKey || !siteUrl) {
+      return reply(500, {
+        error: "Configuration Stripe ou Netlify incomplète."
+      });
+    }
+
+    const contentType =
+      event.headers?.["content-type"] ||
+      event.headers?.["Content-Type"] || "";
+
+    const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+
+    if (!boundaryMatch) {
+      return reply(400, { error: "Format de commande invalide." });
+    }
+
+    const boundary = boundaryMatch[1] || boundaryMatch[2];
+    const raw = Buffer.from(
+      event.body || "",
+      event.isBase64Encoded ? "base64" : "utf8"
+    );
+
+    const parts = raw.toString("latin1").split(`--${boundary}`);
+    const fields = {};
+
+    for (const part of parts) {
+      const separator = part.indexOf("\r\n\r\n");
+      if (separator < 0) continue;
+
+      const partHeaders = part.slice(0, separator);
+      const disposition = partHeaders.match(
+        /content-disposition:\s*form-data;[^\r\n]*name="([^"]+)"/i
+      );
+
+      if (!disposition) continue;
+
+      const name = disposition[1];
+
+      // La photo sera traitée séparément dans une prochaine étape.
+      if (/filename="/i.test(partHeaders)) continue;
+
+      let value = part.slice(separator + 4);
+      value = value.replace(/\r\n$/, "").replace(/--$/, "");
+
+      fields[name] = Buffer.from(value, "latin1").toString("utf8");
+    }
+
+    const products = {
+      "texte": {
+        name: "Mug personnalisé - Prénom ou texte simple",
+        amount: 1000
+      },
+      "photo": {
+        name: "Mug personnalisé - Avec photo",
+        amount: 1200
+      },
+      "photo-texte": {
+        name: "Mug personnalisé - Photo et texte",
+        amount: 1300
+      },
+      "montage": {
+        name: "Mug personnalisé - Montage photo",
+        amount: 1400
+      },
+      "complete": {
+        name: "Mug personnalisé - Personnalisation complète",
+        amount: 1500
+      }
+    };
+
+    const product = products[fields.personalisation];
+    const delivery = fields.delivery;
+
+    if (!product) {
+      return reply(400, { error: "Personnalisation invalide." });
+    }
+
+    if (!["pickup", "shipping"].includes(delivery)) {
+      return reply(400, { error: "Mode de réception invalide." });
+    }
+
+    const customerName = (fields.customer_name || "").trim();
+    const customerEmail = (fields.customer_email || "").trim();
+    const comment = (fields.commentaire || "").trim();
+
+    if (!customerName || customerName.length > 100) {
+      return reply(400, { error: "Veuillez vérifier votre nom." });
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
+      return reply(400, { error: "Adresse e-mail invalide." });
+    }
+
     const params = new URLSearchParams();
 
     params.append("mode", "payment");
-    params.append(
-      "line_items[0][price]",
-      "price_1Uf4hBACoZJOTwN8sMn0hb1q"
-    );
+    params.append("customer_email", customerEmail);
+
+    params.append("line_items[0][price_data][currency]", "eur");
+    params.append("line_items[0][price_data][unit_amount]", String(product.amount));
+    params.append("line_items[0][price_data][product_data][name]", product.name);
     params.append("line_items[0][quantity]", "1");
+
+    if (delivery === "shipping") {
+      params.append("line_items[1][price_data][currency]", "eur");
+      params.append("line_items[1][price_data][unit_amount]", "700");
+      params.append(
+        "line_items[1][price_data][product_data][name]",
+        "Livraison postale"
+      );
+      params.append("line_items[1][quantity]", "1");
+    }
+
+    params.append("metadata[customer_name]", customerName);
+    params.append("metadata[personalisation]", fields.personalisation);
+    params.append("metadata[delivery]", delivery);
+    params.append("metadata[commentaire]", comment.slice(0, 500));
 
     params.append(
       "success_url",
-      `${process.env.URL}/?success=true`
+      `${siteUrl}/?success=true&session_id={CHECKOUT_SESSION_ID}`
     );
 
-    params.append(
-      "cancel_url",
-      `${process.env.URL}/?cancelled=true`
-    );
+    params.append("cancel_url", `${siteUrl}/?cancelled=true`);
 
     const response = await fetch(
       "https://api.stripe.com/v1/checkout/sessions",
       {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+          "Authorization": `Bearer ${secretKey}`,
           "Content-Type": "application/x-www-form-urlencoded"
         },
         body: params.toString()
@@ -44,31 +157,20 @@ exports.handler = async (event) => {
 
     const session = await response.json();
 
-    if (!response.ok) {
-      return {
-        statusCode: 400,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          error: "Impossible de créer le paiement Stripe."
-        })
-      };
+    if (!response.ok || !session.url) {
+      return reply(400, {
+        error: "Stripe n'a pas pu préparer le paiement."
+      });
     }
 
-    return {
-      statusCode: 200,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: session.url
-      })
-    };
+    return reply(200, { url: session.url });
 
   } catch (error) {
-    return {
-      statusCode: 500,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        error: "Une erreur serveur est survenue."
-      })
-    };
+    return reply(500, {
+      error: "Une erreur serveur est survenue."
+    });
   }
 };
+
+
+    
