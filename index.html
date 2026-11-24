@@ -191,7 +191,7 @@ header{background:#fff;position:sticky;top:0;z-index:5;border-bottom:1px solid v
       if(!response.ok||!result.url) throw new Error(result.error||'Le paiement n’est pas encore configuré.');
       window.location.href=result.url;
     }catch(error){
-      status.textContent='La boutique est préparée, mais le paiement ne peut pas encore être lancé : le service sécurisé de commande Stripe doit être configuré sur le site. Aucune donnée ni photo n’a été envoyée.';
+      status.textContent = error.message || 'Une erreur est survenue lors de la commande.';
       button.disabled=false;
     }
   });
