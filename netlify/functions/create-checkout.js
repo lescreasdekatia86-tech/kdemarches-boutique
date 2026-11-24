@@ -135,7 +135,7 @@ exports.handler = async (event) => {
     params.append("metadata[personalisation]", fields.personalisation);
     params.append("metadata[delivery]", delivery);
     params.append("metadata[commentaire]", comment.slice(0, 500));
-
+params.append("metadata[photo_url]", fields.photo_url || "");
     params.append(
       "success_url",
       `${siteUrl}/?success=true&session_id={CHECKOUT_SESSION_ID}`
