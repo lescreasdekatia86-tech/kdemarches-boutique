@@ -158,10 +158,11 @@ exports.handler = async (event) => {
     const session = await response.json();
 
     if (!response.ok || !session.url) {
-      return reply(400, {
-        error: "Stripe n'a pas pu préparer le paiement."
-      });
-    }
+  console.error("Erreur Stripe :", JSON.stringify(session));
+  return reply(400, {
+    error: session.error?.message || "Stripe n'a pas pu préparer le paiement."
+  });
+}
 
     return reply(200, { url: session.url });
 
