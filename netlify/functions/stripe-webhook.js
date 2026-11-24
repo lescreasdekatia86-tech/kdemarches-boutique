@@ -92,7 +92,7 @@ exports.handler = async (event) => {
       <p><strong>E-mail client :</strong> ${escapeHtml(session.customer_details?.email || session.customer_email)}</p>
       <p><strong>Personnalisation :</strong> ${escapeHtml(metadata.personalisation)}</p>
       <p><strong>Réception :</strong> ${escapeHtml(delivery)}</p>
-      <p><strong>Commentaire :</strong> ${escapeHtml(metadata.commentaire)}</p>
+      ${metadata.photo_url ? '<p><strong>Photo du client :</strong> <a href="' + escapeHtml(metadata.photo_url) + '">Ouvrir la photo</a></p>' : ''}
       <p><strong>Total payé :</strong> ${amount} €</p>
       <p>Commande confirmée par Stripe.</p>
     `;
